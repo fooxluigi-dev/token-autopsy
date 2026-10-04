@@ -552,7 +552,7 @@ def selftest():
 
         # --- auto chart: draws when Pillow exists, else prints the hint; never raises ---
         chart_p = os.path.join(td, "t-chart.png")
-        note = auto_chart(res, chart_p)
+        note = auto_chart(res, chart_p, install=False)
         assert note and (note.startswith("chart:") and os.path.exists(chart_p)
                          or "pip install pillow" in note), "auto chart or pillow hint"
         ok.append("auto chart")
@@ -593,14 +593,45 @@ def autodetect(limit=40, candidates=None):
                      "\nrun with an explicit path: python3 token_autopsy.py <file-or-dir>")
 
 # ---------------------------------------------------------------- auto chart
-def auto_chart(res, out="token-autopsy.png"):
-    """Draw the chart right after a human-readable report (best-effort, never fails the run)."""
+PILLOW_HINT = "chart skipped — one-time setup: pip install pillow (then re-run)"
+
+def _ensure_pillow():
+    """Install Pillow only when missing, visibly, only that package.
+    Returns 'present' | 'installed' | 'failed' — never raises, never blocks the report."""
+    try:
+        import PIL  # noqa: F401
+        return "present"
+    except ImportError:
+        pass
+    import subprocess
+    for cmd in (["-m", "pip", "install", "--quiet", "pillow"],
+                ["-m", "pip", "install", "--quiet", "--user", "pillow"]):
+        try:
+            subprocess.run([sys.executable] + cmd, capture_output=True, text=True, timeout=150)
+        except Exception:
+            continue
+        try:
+            import PIL  # noqa: F401
+            return "installed"
+        except ImportError:
+            continue
+    return "failed"
+
+
+def auto_chart(res, out="token-autopsy.png", install=True):
+    """Draw the chart after a human-readable report. Best-effort: never fails the run.
+    If Pillow is missing, installs it on first run (one package, one-time, visible)."""
     try:
         from visualize import render
-        render(json.loads(report(res, as_json=True)), out)
-        return f"chart: {os.path.abspath(out)}"
-    except ImportError:
-        return "chart skipped — one-time setup: pip install pillow   (then re-run)"
+        doc = json.loads(report(res, as_json=True))
+        try:
+            render(doc, out)
+            return f"chart: {os.path.abspath(out)}"
+        except ImportError:
+            if not install or _ensure_pillow() != "installed":
+                return PILLOW_HINT
+            render(doc, out)
+            return f"chart: {os.path.abspath(out)}  (Pillow was installed automatically — one-time)"
     except OSError:
         return "chart skipped — cannot write the file here"
     except Exception as e:
