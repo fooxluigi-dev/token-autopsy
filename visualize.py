@@ -221,7 +221,10 @@ def main(argv=None):
         raise SystemExit(__doc__)
     doc = json.load(open(os.path.expanduser(argv[0])))
     out = os.path.expanduser(argv[1]) if len(argv) == 2 else "chart.png"
-    print(render(doc, out))
+    try:
+        print(render(doc, out))
+    except ImportError:
+        raise SystemExit("visualize needs Pillow (the report itself needs nothing): pip install pillow")
 
 
 if __name__ == "__main__":

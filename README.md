@@ -10,6 +10,7 @@ how many API calls were retries. `token-autopsy` reads your agent's transcripts 
 answers that.
 
 ```
+python3 token_autopsy.py                         # zero-arg: auto-detects your agent's logs
 python3 token_autopsy.py ~/.hermes/state.db      # Hermes
 python3 token_autopsy.py session.jsonl           # Claude-Code / OpenAI-style JSONL
 python3 token_autopsy.py some/log/dir            # recurse for .jsonl / .db
@@ -90,6 +91,11 @@ OpenAI) have no lever 1 and a ~1.3–1.6x ceiling. Dollars barely move (caching 
 made input ~10x cheaper); the real wins are **context window** and **latency**.
 
 ## Supported transcripts
+
+Run with no arguments and it probes the usual locations in order
+(`~/.hermes/state.db`, `~/.claude/projects`, `~/.codex/sessions`,
+`~/.local/share/opencode`, `~/.gemini/tmp`) and uses the first that has sessions;
+if nothing is found it prints exactly what it probed, so agents don't guess.
 
 - **Hermes** `state.db` (sqlite) — verified against real data
 - **Generic JSONL** — OpenAI-shape lines (`{role, content, usage}`) and Claude-Code-shape

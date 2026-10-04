@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import argparse
 import bisect
+import glob
 import json
 import math
 import os
@@ -533,8 +534,56 @@ def selftest():
         txt2 = compare(d1, _copy.deepcopy(d1))
         assert "0.0%" in txt2 or "n/a" in txt2, "compare identical"
         ok.append("compare")
+
+        # --- autodetect + clean errors ---
+        got = autodetect(40, candidates=[db])
+        assert got[0] == db and len(got[1]) == 1, "autodetect finds fixture db"
+        try:
+            autodetect(40, candidates=[os.path.join(td, "nope.jsonl"), db + "-missing"])
+            raise AssertionError("autodetect must fail on empty probe")
+        except SystemExit as e:
+            assert "no agent transcripts found" in str(e) and "not found" in str(e), "probe list in error"
+        try:
+            main(["/definitely/not/here.jsonl"])
+            raise AssertionError("bad path must exit")
+        except SystemExit as e:
+            assert "not found" in str(e), "clean one-line path error"
+        ok.append("autodetect + clean errors")
     print("SELFTEST PASS: " + ", ".join(ok))
     return 0
+
+# ---------------------------------------------------------------- auto-discovery
+AUTO_CANDIDATES = [
+    "~/.hermes/state.db",        # Hermes (sqlite)
+    "~/.claude/projects",        # Claude Code sessions (jsonl)
+    "~/.codex/sessions",         # Codex CLI rollouts (jsonl)
+    "~/.local/share/opencode",   # OpenCode
+    "~/.gemini/tmp",             # Gemini CLI logs
+]
+
+def autodetect(limit=40, candidates=None):
+    """Find agent transcripts without being told where they are -> zero-arg runs work."""
+    tried = []
+    for pat in (candidates or AUTO_CANDIDATES):
+        full = os.path.expanduser(pat)
+        paths = sorted(glob.glob(full)) or ([full] if os.path.exists(full) else [])
+        if not paths:
+            tried.append(f"{pat} (not found)")
+            continue
+        for path in paths:
+            try:
+                sessions = load(path, limit)
+            except SystemExit as e:
+                tried.append(f"{path} ({e})")
+                continue
+            except Exception as e:
+                tried.append(f"{path} ({type(e).__name__})")
+                continue
+            if sessions:
+                return path, sessions
+            tried.append(f"{path} (no sessions)")
+    raise SystemExit("no agent transcripts found. probed:\n  " + "\n  ".join(tried) +
+                     "\nrun with an explicit path: python3 token_autopsy.py <file-or-dir>")
 
 # ---------------------------------------------------------------- main
 def main(argv=None):
@@ -553,11 +602,22 @@ def main(argv=None):
         docs = [json.load(open(os.path.expanduser(x))) for x in args.compare]
         print(compare(*docs))
         return 0
-    if not args.path:
-        ap.error("path required (or --selftest)")
-    sessions = load(os.path.abspath(os.path.expanduser(args.path)), args.limit or 10**9)
-    if not sessions:
-        raise SystemExit("no sessions found (need >=4 messages and >=1 tool call, or jsonl messages)")
+    limit = args.limit or 10**9
+    if args.path:
+        where = os.path.abspath(os.path.expanduser(args.path))
+        try:
+            sessions = load(where, limit)
+        except SystemExit:
+            raise
+        except FileNotFoundError:
+            raise SystemExit(f"not found: {where}")
+        except Exception as e:
+            raise SystemExit(f"cannot read {where}: {type(e).__name__}: {e}")
+        if not sessions:
+            raise SystemExit(f"no sessions in {where} (need >=4 messages and >=1 tool call, "
+                             "or jsonl messages with role/content)")
+    else:
+        where, sessions = autodetect(limit)
     res = analyze(sessions)
     print(report(res, as_json=args.json))
     return 0
