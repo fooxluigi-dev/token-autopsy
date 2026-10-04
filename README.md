@@ -2,7 +2,9 @@
 
 **Where do your AI agent's tokens actually go?** One command. Zero dependencies.
 
-Agent CLIs tell you your bill. Nobody tells you the *composition*: how much of every
+![Where your agent's tokens go](case-study.png)
+
+Agent CLIs tell you your bill. Nobody tells you the *composition*: how much of every prompt
 prompt is prior reasoning being replayed, how much is the static prefix nobody looks at,
 how many API calls were retries. `token-autopsy` reads your agent's transcripts and
 answers that.
@@ -51,6 +53,19 @@ and rule-based hints pointing at the biggest lever.
 
 Conclusion from that run: the biggest token levers are reasoning budget, slimming the
 static prefix, and retry hardening — *not* source-code style. Measure before you optimize.
+
+## Visualize (optional — needs Pillow, nothing else)
+
+```
+pip install pillow
+python3 token_autopsy.py <logs> --json > report.json
+python3 visualize.py report.json chart.png
+```
+
+Same dark, color-coded chart as the image above — donut of every prompt, output bars,
+stat cards. It is drawn with Python drawing primitives: **no design tools, no AI image
+generation, no manual work** — anyone gets their own version of this picture in one
+command. `python3 visualize.py --selftest` checks it renders.
 
 ## The solution: diagnosis is only half
 
