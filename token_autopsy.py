@@ -549,6 +549,13 @@ def selftest():
         except SystemExit as e:
             assert "not found" in str(e), "clean one-line path error"
         ok.append("autodetect + clean errors")
+
+        # --- auto chart: draws when Pillow exists, else prints the hint; never raises ---
+        chart_p = os.path.join(td, "t-chart.png")
+        note = auto_chart(res, chart_p)
+        assert note and (note.startswith("chart:") and os.path.exists(chart_p)
+                         or "pip install pillow" in note), "auto chart or pillow hint"
+        ok.append("auto chart")
     print("SELFTEST PASS: " + ", ".join(ok))
     return 0
 
@@ -585,6 +592,20 @@ def autodetect(limit=40, candidates=None):
     raise SystemExit("no agent transcripts found. probed:\n  " + "\n  ".join(tried) +
                      "\nrun with an explicit path: python3 token_autopsy.py <file-or-dir>")
 
+# ---------------------------------------------------------------- auto chart
+def auto_chart(res, out="token-autopsy.png"):
+    """Draw the chart right after a human-readable report (best-effort, never fails the run)."""
+    try:
+        from visualize import render
+        render(json.loads(report(res, as_json=True)), out)
+        return f"chart: {os.path.abspath(out)}"
+    except ImportError:
+        return "chart skipped — one-time setup: pip install pillow   (then re-run)"
+    except OSError:
+        return "chart skipped — cannot write the file here"
+    except Exception as e:
+        return f"chart skipped ({type(e).__name__}: {e})"
+
 # ---------------------------------------------------------------- main
 def main(argv=None):
     ap = argparse.ArgumentParser(prog="token-autopsy",
@@ -620,6 +641,10 @@ def main(argv=None):
         where, sessions = autodetect(limit)
     res = analyze(sessions)
     print(report(res, as_json=args.json))
+    if not args.json:
+        note = auto_chart(res)
+        if note:
+            print(note)
     return 0
 
 if __name__ == "__main__":

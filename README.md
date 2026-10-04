@@ -57,6 +57,10 @@ static prefix, and retry hardening — *not* source-code style. Measure before y
 
 ## Visualize (optional — needs Pillow, nothing else)
 
+The chart is **drawn automatically after every report run** — if Pillow is installed
+you get `token-autopsy.png` next to the report, otherwise the run prints the one-time
+`pip install pillow` hint and still finishes. Manual path (for custom filenames):
+
 ```
 pip install pillow
 python3 token_autopsy.py <logs> --json > report.json
