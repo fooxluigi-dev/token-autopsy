@@ -76,7 +76,10 @@ command. `python3 visualize.py --selftest` checks it renders.
 
 ## The solution: diagnosis is only half
 
-Every hint the report prints maps to a concrete fix in **[PLAYBOOK.md](PLAYBOOK.md)** —
+Every run ends with a **`## fixes` section that is self-contained**: diagnosis +
+exact change (config keys for Hermes / Claude Code) + risk, numbered by priority —
+an agent can act on the output alone, no file lookup needed. Deeper detail lives in
+**[PLAYBOOK.md](PLAYBOOK.md)** —
 ordered by measured size × safety, with exact settings per tool (Hermes, Claude Code,
 generic) and the risk of each:
 

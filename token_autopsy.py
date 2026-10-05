@@ -303,28 +303,40 @@ def analyze(sessions):
     return out
 
 def hints(agg):
+    """Each hint is self-contained: diagnosis + exact fix + risk, so the run output
+    alone is enough to act on (no need to open PLAYBOOK.md first)."""
     h = []
     ctx = agg["avg_ctx_pct"]
     if ctx.get("reasoning_replay", 0) >= 15:
-        h.append("reasoning replay is >=15% of every prompt: on echo-back providers "
-                 "(deepseek/mimo/kimi) it's required; elsewhere it's stripped. "
-                 "Lower reasoning_effort, or use a provider that doesn't replay it.")
+        h.append(f"[reasoning] {ctx['reasoning_replay']}% of every prompt is prior thinking re-sent "
+                 "(echo-back providers only: deepseek/mimo/kimi). FIX: move casual sessions to a "
+                 "provider that does not replay reasoning, or shrink it: Hermes config.yaml → "
+                 "`reasoning_effort: low` (or `reasoning_overrides: {model: low}`). "
+                 "RISK: hard tasks get dumber — if retries rise, put it back.")
     if agg["out_pct"].get("reasoning_replay", 0) >= 40:
-        h.append("reasoning is >=40% of output tokens: trim reasoning_effort for simple turns.")
+        h.append(f"[thinking] {agg['out_pct']['reasoning_replay']}% of output tokens are thinking. "
+                 "FIX: lower reasoning budget for simple/cheap sessions, keep it high only where "
+                 "quality matters (Hermes: reasoning_effort; Claude Code: thinking budget / no-think model). "
+                 "RISK: quality on hard tasks — verify with --compare + error rate.")
     if ctx.get("static_prefix", 0) >= 15:
-        h.append("static prefix (system+skills+tool schemas) is >=15% of every prompt: "
-                 "slim skills and disable unused toolsets per task.")
+        h.append(f"[static prefix] {ctx['static_prefix']}% of every prompt is system+skills+tool schemas. "
+                 "FIX: Hermes → delete unused skills from the list, set `disabled_toolsets: [...]` for "
+                 "task-scoped runs; Claude Code → slim CLAUDE.md, disable unused MCP servers (/mcp). "
+                 "RISK: under-tooling causes extra tool calls — watch the tool-call count.")
     rr = agg.get("retry_ratio")
     if rr and rr >= 1.5:
-        h.append(f"billed API calls are {rr:.1f}x recorded responses: retry storms. "
-                 "Harden retries/fallbacks; every retry re-pays the prompt.")
+        h.append(f"[retries] {rr:.1f}x more billed calls than recorded responses — most calls failed. "
+                 "FIX: the provider is flaking: add a fallback provider, raise timeouts, leave free/rate-limited "
+                 "tiers for real work. RISK: none — this lever is pure profit.")
     if ctx.get("tool_results", 0) >= 15:
-        h.append("tool results are >=15% of context: truncate stdout harder, read narrower slices.")
+        h.append(f"[tool results] {ctx['tool_results']}% of context is tool output. "
+                 "FIX: truncate stdout harder, read line ranges instead of whole files, batch reads. "
+                 "RISK: too-truncated output → re-reads (more calls); back off if tool-call count rises.")
     if agg["ctx_total"] >= 100_000:
-        h.append(f"avg context {agg['ctx_total']:,.0f} tokens: near common 128k windows, "
-                 "expect compaction. Shrink ride-along terms first.")
+        h.append(f"[window] avg context {agg['ctx_total']:,.0f} tokens — near common 128k limits, expect "
+                 "compaction. FIX: shrink the ride-along terms above (they are the bulk of it).")
     if not h:
-        h.append("no single term dominates; profile again after any config change.")
+        h.append("no single term dominates — nothing worth changing yet. Re-run after any config change.")
     return h
 
 def report(res, as_json=False):
@@ -388,9 +400,10 @@ def report(res, as_json=False):
         L += ["\n## top tool-result tokens", "| tool | tokens |", "|---|---|"]
         for k, v in tools.most_common(6):
             L.append(f"| {k} | {v:,} |")
-    L += ["\n## hints"]
-    L += [f"- {h}" for h in hints(agg)]
-    L.append("- remedies for every hint: see PLAYBOOK.md (bundled); verify with --compare")
+    L += ["\n## fixes (priority order — apply ONE, then verify)",]
+    L += [f"{i}. {h}" for i, h in enumerate(hints(agg), 1)]
+    L.append("verify: --json > before.json → apply one fix → --json > after.json → "
+             "--compare before.json after.json   (details/risks: PLAYBOOK.md)")
     return "\n".join(L)
 
 # ---------------------------------------------------------------- compare
@@ -468,7 +481,7 @@ def selftest():
         assert res[0]["out_cat"]["assistant_text"] > 0, "output text cat (final reply)"
         assert res[0]["retry_ratio"] and abs(res[0]["retry_ratio"] - 1.0) < 1e-9, "retry ratio"
         rep = report(res)
-        assert "avg context composition" in rep and "hints" in rep, "report sections"
+        assert "avg context composition" in rep and "fixes (priority order" in rep, "report sections"
         ok.append("hermes adapter")
 
         # --- claude-code-shaped jsonl fixture ---
@@ -556,6 +569,13 @@ def selftest():
         assert note and (note.startswith("chart:") and os.path.exists(chart_p)
                          or "pip install pillow" in note), "auto chart or pillow hint"
         ok.append("auto chart")
+        fake_agg = {"avg_ctx_pct": {"reasoning_replay": 27.1, "static_prefix": 26.9, "tool_results": 20.0},
+                    "out_pct": {"reasoning_replay": 60.0},
+                    "ctx_total": 114332, "retry_ratio": 1.98}
+        hs = hints(fake_agg)
+        assert len(hs) == 6 and all("FIX:" in x for x in hs) and all("RISK:" in x for x in hs[:5]), \
+            "every lever carries a concrete fix + risk (window hint is a symptom, fix implied)"
+        ok.append("actionable fixes")
     print("SELFTEST PASS: " + ", ".join(ok))
     return 0
 
