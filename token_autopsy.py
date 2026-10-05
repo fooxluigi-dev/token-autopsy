@@ -124,7 +124,7 @@ def categorize_content(role, content, tool_calls=None, reasoning=None):
     return dict(cats), tool_name
 
 # ---------------------------------------------------------------- readers
-def read_hermes(path, limit=40):
+def read_hermes(path, limit=100):
     """Hermes state.db — verified against real data (see README case study)."""
     con = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
     con.row_factory = sqlite3.Row
@@ -235,7 +235,7 @@ def read_jsonl(path):
     date = time.strftime("%Y-%m-%d", time.localtime(os.path.getmtime(path)))
     return [new_session(os.path.basename(path), date, source or "jsonl", model, msgs, usage)]
 
-def load(path, limit=40):
+def load(path, limit=100):
     if os.path.isdir(path):
         out = []
         for root, _, files in os.walk(path):
@@ -568,7 +568,7 @@ AUTO_CANDIDATES = [
     "~/.gemini/tmp",             # Gemini CLI logs
 ]
 
-def autodetect(limit=40, candidates=None):
+def autodetect(limit=100, candidates=None):
     """Find agent transcripts without being told where they are -> zero-arg runs work."""
     tried = []
     for pat in (candidates or AUTO_CANDIDATES):
@@ -644,7 +644,7 @@ def main(argv=None):
     ap.add_argument("path", nargs="?", help="transcript file, Hermes state.db, or directory")
     ap.add_argument("--selftest", action="store_true", help="run built-in fixture tests")
     ap.add_argument("--json", action="store_true", help="machine-readable output")
-    ap.add_argument("--limit", type=int, default=40, help="max sessions to read (default 40, 0=all)")
+    ap.add_argument("--limit", type=int, default=100, help="max sessions to read (default 100, 0=all)")
     ap.add_argument("--compare", nargs=2, metavar=("BEFORE", "AFTER"),
                     help="diff two --json reports (before/after a config change)")
     args = ap.parse_args(argv)
