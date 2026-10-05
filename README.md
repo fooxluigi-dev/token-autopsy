@@ -70,7 +70,9 @@ python3 visualize.py report.json chart.png
 ```
 
 Same dark, color-coded chart as the image above — donut of every prompt, output bars,
-stat cards. It is drawn with Python drawing primitives: **no design tools, no AI image
+stat cards. **The chart is a real file written to the folder you ran from** — the last
+line gives its absolute path (`open "<path>"` on macOS to view it). Agents: send/attach
+that file if your user asks to *see* the chart — text output alone won't show an image. It is drawn with Python drawing primitives: **no design tools, no AI image
 generation, no manual work** — anyone gets their own version of this picture in one
 command. `python3 visualize.py --selftest` checks it renders.
 
