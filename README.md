@@ -135,6 +135,13 @@ if nothing is found it prints exactly what it probed, so agents don't guess.
 - Shares are accurate; absolutes depend on the tokenizer (labeled in the report header).
 - Compacted/absorbed messages (where transcripts mark them inactive) are excluded —
   they no longer ride along.
+- **Stats are weighted by API calls** (a 600-call session counts 600× a 1-call
+  session); the report also shows the median session and the fattest sessions, since
+  cost and retries are outlier-driven.
+- **`--compare` is window-aware**: sessions present identically in both captures are
+  excluded, and only activity unique to each side is compared — otherwise a sliding
+  session window dilutes the delta with byte-identical data. With no new activity yet
+  it says so instead of printing a misleading number.
 
 ## License
 

@@ -28,6 +28,7 @@ from __future__ import annotations
 import argparse
 import bisect
 import glob
+import statistics
 import json
 import math
 import os
@@ -341,8 +342,13 @@ def hints(agg):
 
 def report(res, as_json=False):
     n = len(res)
-    ctx_avg = {c: sum(r["avg_ctx"].get(c, 0) for r in res) / n for c in CATS}
+    # A: weight every session by its API calls — a 600-call session must not be
+    # drowned by fifty 2-call cron sessions (or vice versa).
+    tot_w = sum((r.get("calls") or 1) for r in res) or n
+    ctx_avg = {c: sum(r["avg_ctx"].get(c, 0) * (r.get("calls") or 1) for r in res) / tot_w
+               for c in CATS}
     ctx_total = sum(ctx_avg.values()) or 1
+    med_ctx = statistics.median(r["ctx_total"] for r in res)
     out_cat = Counter()
     for r in res:
         out_cat.update(r["out_cat"])
@@ -359,7 +365,8 @@ def report(res, as_json=False):
         tools.update(r["top_tools"])
     agg = {"avg_ctx_pct": {k: round(100 * v / ctx_total, 1) for k, v in ctx_avg.items()},
            "out_pct": {k: round(100 * v / out_total, 1) for k, v in out_cat.items()},
-           "ctx_total": round(ctx_total), "retry_ratio": rr}
+           "ctx_total": round(ctx_total), "median_ctx": round(med_ctx),
+           "weighting": "api_calls", "retry_ratio": rr}
 
     if as_json:
         return json.dumps({"sessions": [
@@ -379,7 +386,8 @@ def report(res, as_json=False):
         L.append(f"| {r['date']} | {r['source'][:9]} | {str(r['model'])[:20]} | {r['calls']} | {rr_s} | "
                  f"{u.get('prompt', 0):,} | {u.get('cache_read', 0):,} | {u.get('completion', 0):,} | "
                  f"{u.get('reasoning', 0):,} | {u.get('cost', 0):.3f} |")
-    L += ["\n## avg context composition per API call", "| category | share | tokens |", "|---|---|---|"]
+    L += [f"\nweighted by API calls · median session {med_ctx:,.0f} tokens/call",
+          "\n## avg context composition per API call", "| category | share | tokens |", "|---|---|---|"]
     for k, v in sorted(ctx_avg.items(), key=lambda kv: -kv[1]):
         if v > 0:
             L.append(f"| {k} | {100*v/ctx_total:.1f}% | {v:,.0f} |")
@@ -396,6 +404,15 @@ def report(res, as_json=False):
                  f"({100*billed['cache_read']/tot_in:.0f}% cached)")
     if billed["cost"]:
         L.append(f"- est. cost: ${billed['cost']:.2f}")
+    fat = sorted(res, key=lambda r: -(r["usage"].get("prompt", 0) + r["usage"].get("cache_read", 0)))
+    fat = [r for r in fat[:5] if (r["usage"].get("prompt", 0) + r["usage"].get("cache_read", 0)) > 0]
+    if fat:
+        L += ["\n## fattest sessions (outliers drive cost & retries)",
+              "| date | calls | prompt in | retry x | $ |", "|---|---|---|---|---|"]
+        for r in fat:
+            u, rr_s = r["usage"], (f"{r['retry_ratio']:.2f}" if r["retry_ratio"] else "-")
+            L.append(f"| {r['date']} | {r['calls']} | {u.get('prompt',0)+u.get('cache_read',0):,} "
+                     f"| {rr_s} | {u.get('cost',0):.3f} |")
     if tools:
         L += ["\n## top tool-result tokens", "| tool | tokens |", "|---|---|"]
         for k, v in tools.most_common(6):
@@ -407,24 +424,55 @@ def report(res, as_json=False):
     return "\n".join(L)
 
 # ---------------------------------------------------------------- compare
-def _avg_cat(doc, key):
+def _avg_cat(doc, key, weight=False):
+    """weight=True: call-weighted mean (per-call metrics); False: per-session mean."""
     ss = doc.get("sessions") or []
     n = max(len(ss), 1)
+    tot_w = sum(((s.get("usage") or {}).get("calls") or 1) for s in ss) or n
     out = Counter()
     for s in ss:
+        w = ((s.get("usage") or {}).get("calls") or 1) if weight else 1
+        div = tot_w if weight else n
         for k, v in (s.get(key) or {}).items():
-            out[k] += (v or 0) / n
+            out[k] += (v or 0) * w / div
     return out
 
 def _pct(b, a):
     return f"{100 * (a - b) / b:+.1f}%" if b else "n/a"
 
 def compare(before, after):
-    """Diff two --json reports: before/after a config change."""
-    L = ["# before → after", ""]
+    """Diff two --json reports: before/after a config change.
+    Overlap-aware: identical shared sessions cancel out; only activity unique to
+    each capture is compared (a sliding session window otherwise dilutes the delta
+    with sessions that are byte-identical on both sides)."""
+    ids_b = {s.get("id") for s in (before.get("sessions") or [])}
+    ids_a = {s.get("id") for s in (after.get("sessions") or [])}
+    shared = ids_b & ids_a
+    if shared and ids_b != ids_a:
+        only_b = [s for s in before["sessions"] if s.get("id") not in shared]
+        only_a = [s for s in after["sessions"] if s.get("id") not in shared]
+        if not only_a:
+            return ("# before → after\n\nno NEW sessions since the 'before' capture — nothing to "
+                    "prove a fix with yet.\nUse the agent for fresh activity, then re-run both "
+                    f"captures (or widen --limit).\nshared sessions excluded: {len(shared)}.")
+        if not only_b:
+            return ("# before → after\n\nno sessions unique to the 'before' capture — the after "
+                    "window swallowed it all.\nCapture 'before' with a wider --limit window, or "
+                    "wait for sessions to roll out.\nshared sessions excluded: "
+                    f"{len(shared)}.")
+        before = {**before, "sessions": only_b}
+        after = {**after, "sessions": only_a}
+        note = (f"window-aware: only activity unique to each capture is compared "
+                f"({len(only_b)} before-only vs {len(only_a)} after-only; "
+                f"{len(shared)} shared identical sessions excluded)")
+    elif shared:
+        note = f"session sets identical ({len(shared)}) — deltas reflect re-analysis, not new activity"
+    else:
+        note = "no shared sessions (different sources/windows) — comparing as-is; window effects included"
+    L = ["# before → after", "", note, ""]
     for title, key, unit in (("avg context per API call", "context_avg_by_cat", "/call"),
                              ("output tokens", "output_by_cat", "/session")):
-        b, a = _avg_cat(before, key), _avg_cat(after, key)
+        b, a = _avg_cat(before, key, weight=(key == "context_avg_by_cat")), _avg_cat(after, key, weight=(key == "context_avg_by_cat"))
         L += [f"## {title} ({unit})", "| category | before | after | Δ | Δ% |", "|---|---|---|---|---|"]
         for k in sorted(set(b) | set(a), key=lambda k: -abs(a[k] - b[k])):
             L.append(f"| {k} | {b[k]:,.0f} | {a[k]:,.0f} | {a[k]-b[k]:+,.0f} | {_pct(b[k], a[k])} |")
@@ -433,10 +481,12 @@ def compare(before, after):
         tail = (f"**{tb/ta:.2f}x fewer**" if 0 < ta < tb else
                 (f"**{ta/tb:.2f}x more**" if ta > tb else "**unchanged**"))
         L.append(f"→ {tail}\n")
-    bb = (before.get("aggregate") or {}).get("retry_ratio")
-    aa = (after.get("aggregate") or {}).get("retry_ratio")
+    def _retry(doc):
+        rs = [s.get("retry_ratio") for s in (doc.get("sessions") or []) if s.get("retry_ratio")]
+        return sum(rs) / len(rs) if rs else None
+    bb, aa = _retry(before), _retry(after)
     fmt = lambda v: f"{v:.2f}" if isinstance(v, (int, float)) else "-"
-    L.append(f"retry ratio: {fmt(bb)} → {fmt(aa)}" +
+    L.append(f"retry x (session avg): {fmt(bb)} → {fmt(aa)}" +
              ("  ⚠ worse: fixes traded tokens for failures" if bb and aa and aa > bb else ""))
     sb, sa = len(before.get("sessions") or []), len(after.get("sessions") or [])
     L.append(f"sessions compared: {sb} → {sa}")
@@ -576,6 +626,38 @@ def selftest():
         assert len(hs) == 6 and all("FIX:" in x for x in hs) and all("RISK:" in x for x in hs[:5]), \
             "every lever carries a concrete fix + risk (window hint is a symptom, fix implied)"
         ok.append("actionable fixes")
+
+        # --- A: call-weighted aggregation + median ---
+        fake_res = [
+            {"id": "a", "date": "d1", "source": "t", "model": "m", "messages": [],
+             "avg_ctx": {"reasoning_replay": 100.0}, "ctx_total": 100.0, "out_cat": {},
+             "retry_ratio": None, "calls": 1, "usage": {"calls": 1}, "top_tools": {}},
+            {"id": "b", "date": "d2", "source": "t", "model": "m", "messages": [],
+             "avg_ctx": {"reasoning_replay": 0.0}, "ctx_total": 0.0, "out_cat": {},
+             "retry_ratio": None, "calls": 9, "usage": {"calls": 9}, "top_tools": {}}]
+        docA = json.loads(report(fake_res, as_json=True))
+        assert docA["aggregate"]["ctx_total"] == 10, (
+            f"call-weighted ctx_total must be (1*100+9*0)/10=10, got {docA['aggregate']['ctx_total']}")
+        assert docA["aggregate"]["median_ctx"] == 50, "median of session ctx totals"
+        assert docA["aggregate"]["weighting"] == "api_calls"
+        ok.append("call-weighted stats")
+
+        # --- D: overlap-aware compare ---
+        def mk(sid, ctx, calls=1):
+            return {"id": sid, "context_avg_by_cat": {"reasoning_replay": ctx},
+                    "output_by_cat": {"reasoning": ctx}, "usage": {"calls": calls},
+                    "retry_ratio": 1.0}
+        bdoc = {"sessions": [mk("s1", 100), mk("s2", 50)], "aggregate": {}}
+        adoc = {"sessions": [mk("s2", 50), mk("s3", 50), mk("s4", 50)], "aggregate": {}}
+        out = compare(bdoc, adoc)
+        assert "shared identical sessions excluded" in out, "overlap note"
+        assert "-50.0%" in out, f"split compare delta (s1=100 vs s3,s4=50):\n{out}"
+        out2 = compare(bdoc, {"sessions": [mk("s1", 100)], "aggregate": {}})
+        assert "no NEW sessions" in out2, "no-new-activity refuses to print a fake delta"
+        out3 = compare({"sessions": [mk("x", 10)], "aggregate": {}},
+                       {"sessions": [mk("y", 10)], "aggregate": {}})
+        assert "no shared sessions" in out3, "disjoint windows noted"
+        ok.append("overlap-aware compare")
     print("SELFTEST PASS: " + ", ".join(ok))
     return 0
 

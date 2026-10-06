@@ -73,9 +73,11 @@ def load_stats(doc):
         raise SystemExit("no sessions in report")
     n = len(ss)
     ctx = {}
+    tot_w = sum(((s.get("usage") or {}).get("calls") or 1) for s in ss) or n
     for s in ss:
+        w = (s.get("usage") or {}).get("calls") or 1
         for k, v in (s.get("context_avg_by_cat") or {}).items():
-            ctx[k] = ctx.get(k, 0) + (v or 0) / n
+            ctx[k] = ctx.get(k, 0) + (v or 0) * w / tot_w
     out, usage = {}, {"calls": 0, "prompt": 0, "completion": 0, "cache_read": 0, "cost": 0.0}
     for s in ss:
         for k, v in (s.get("output_by_cat") or {}).items():
