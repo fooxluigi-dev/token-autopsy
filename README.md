@@ -1,11 +1,14 @@
 # token-autopsy
 
+[![test](https://github.com/Cacaomeraviglia/token-autopsy/actions/workflows/test.yml/badge.svg)](https://github.com/Cacaomeraviglia/token-autopsy/actions/workflows/test.yml)
+[![license: MIT](https://img.shields.io/badge/license-MIT-yellow)](LICENSE)
+
 **Where do your AI agent's tokens actually go?** One command. Zero dependencies.
 
 ![Where your agent's tokens go](case-study.png)
 
 Agent CLIs tell you your bill. Nobody tells you the *composition*: how much of every prompt
-prompt is prior reasoning being replayed, how much is the static prefix nobody looks at,
+is prior reasoning being replayed, how much is the static prefix nobody looks at,
 how many API calls were retries. `token-autopsy` reads your agent's transcripts and
 answers that.
 
