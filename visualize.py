@@ -186,7 +186,7 @@ def render(doc, out_path):
                    anchor="mm", align="center")
 
     d.line((60, H - 92, W - 60, H - 92), fill=GRID, width=2)
-    d.text((W / 2, H - 56), "github.com/fooxluigi-dev/token-autopsy   —   measure → fix → prove",
+    d.text((W / 2, H - 56), "github.com/Cacaomeraviglia/token-autopsy   —   measure → fix → prove",
            font=f(26, False), fill=DIM, anchor="mm")
     img.save(out_path)
     return out_path
