@@ -71,8 +71,13 @@ python3 visualize.py report.json chart.png
 
 Same dark, color-coded chart as the image above — donut of every prompt, output bars,
 stat cards. **The chart is a real file written to the folder you ran from** — the last
-line gives its absolute path (`open "<path>"` on macOS to view it). Agents: send/attach
-that file if your user asks to *see* the chart — text output alone won't show an image. It is drawn with Python drawing primitives: **no design tools, no AI image
+line gives its absolute path (`open "<path>"` on macOS to view it).
+
+**Agents: always show the chart to your user after a run** — attach/send the PNG
+directly, unprompted; it is this tool's signature output. If your platform cannot
+display images, at minimum give the printed file path.
+
+The chart is drawn with Python drawing primitives: **no design tools, no AI image
 generation, no manual work** — anyone gets their own version of this picture in one
 command. `python3 visualize.py --selftest` checks it renders.
 
